@@ -2,7 +2,7 @@ import { config } from "./config.js";
 import { log } from "./logger.js";
 import { store } from "./state.js";
 import { rpc } from "./rpc.js";
-import { buildMintPlan, bnbToWei } from "./classify.js";
+import { buildMintPlan, findMintCandidate, bnbToWei } from "./classify.js";
 import { wallet } from "./baw.js";
 import { notify, projectMessage } from "./telegram.js";
 
@@ -154,27 +154,55 @@ export async function handleEvent(event) {
     return;
   }
 
-  // ---- 执行：baw preview（币安侧模拟）→ execute ----
-  try {
-    log.info("minter", `preview: to=${plan.contract} value=${plan.valueWei} data=${plan.inputData.slice(0, 34)}…`);
+  // ---- 执行：baw preview（币安侧模拟）→ execute；preview 被拒时用候选 calldata 兜底一次 ----
+  const tryMint = async (inputData) => {
+    log.info("minter", `preview: to=${plan.contract} value=${plan.valueWei} data=${inputData.slice(0, 34)}…`);
     const { requestId } = await wallet.contractCallPreview({
       from: walletState.address,
       to: plan.contract,
       valueWei: plan.valueWei,
-      inputData: plan.inputData,
+      inputData,
     });
     log.info("minter", `preview OK requestId=${requestId}，执行`);
-    const exec = await wallet.contractCallExecute(requestId);
+    return wallet.contractCallExecute(requestId);
+  };
+
+  try {
+    let viaCandidate = false;
+    let exec;
+    try {
+      exec = await tryMint(plan.inputData);
+    } catch (firstErr) {
+      // 币安侧模拟拒绝：可能是发现者 calldata 带有特定参数/状态已变。试模拟通过的候选签名。
+      const alt = await findMintCandidate(event, walletState.address);
+      if (alt && alt.toLowerCase() !== String(plan.inputData).toLowerCase()) {
+        log.info("minter", `preview 被拒（${String(firstErr.message).slice(0, 160)}），尝试候选 calldata: ${alt.slice(0, 10)}…`);
+        exec = await tryMint(alt);
+        viaCandidate = true;
+      } else {
+        throw firstErr;
+      }
+    }
     log.info("minter", `execute 完成 status=${exec.status} tx=${exec.txHash}`);
-    store.recordAttempt(eventId, plan.contract, "minted", { txHash: exec.txHash });
+    store.recordAttempt(eventId, plan.contract, "minted", {
+      txHash: exec.txHash,
+      via: viaCandidate ? "candidate-calldata" : "discovery-tx",
+    });
     notify(projectMessage({
       plan,
-      action: "✅ <b>自动 mint 已提交</b>",
+      action: "✅ <b>自动 mint 已提交</b>" + (viaCandidate ? "（候选 calldata）" : ""),
       detail: exec.txHash ? `交易: <code>${exec.txHash}</code>\nhttps://bscscan.com/tx/${exec.txHash}` : JSON.stringify(exec.raw).slice(0, 400),
     }));
   } catch (e) {
-    log.error("minter", `mint 失败 ${plan.name}: ${e.message}`);
+    log.error("minter", `mint 放弃 ${plan.name}: ${e.message}`);
     store.recordAttempt(eventId, plan.contract, "mint-failed", { reason: String(e.message).slice(0, 500) });
-    notify(projectMessage({ plan, action: "❌ <b>自动 mint 失败</b>", detail: String(e.message).slice(0, 500) }));
+    // preview 被拒 = 未广播上链，无 gas 损失；常见原因随推送带出
+    notify(projectMessage({
+      plan,
+      action: "🟡 <b>模拟未通过，已自动放弃</b>（未上链、无损失）",
+      detail: String(e.message)
+        .replace(/^baw contract-call preview 失败: /, "币安模拟拒绝: ")
+        .slice(0, 400),
+    }));
   }
 }

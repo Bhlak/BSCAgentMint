@@ -25,6 +25,17 @@ function parseJsonLoose(stdout) {
   }
 }
 
+/** 从 baw --json 的失败输出里提取真实错误（如 EXECUTION_REVERTED: xxx），比命令回显有用得多 */
+function extractBawError(stdout) {
+  const j = parseJsonLoose(stdout || "");
+  if (j && j.error) {
+    const name = j.error.name || j.error.code || "";
+    const msg = j.error.message || (j.error.data && JSON.stringify(j.error.data)) || "";
+    return (name + ": " + msg).trim();
+  }
+  return null;
+}
+
 /** 运行 baw CLI（自动追加 --json），返回解析后的 JSON 或 {raw}；子进程显式注入代理环境 */
 export async function baw(args, timeoutMs = 120_000) {
   const { stdout, stderr } = await execFileP(process.execPath, [CLI_ENTRY, ...args, "--json"], {
@@ -33,9 +44,9 @@ export async function baw(args, timeoutMs = 120_000) {
     maxBuffer: 16 * 1024 * 1024,
     windowsHide: true,
   }).catch((e) => {
-    // execFile 的错误对象也带 stdout/stderr
-    const out = (e.stdout || "") + (e.stderr || "");
-    throw new Error(`baw ${args.join(" ")} 失败: ${e.message}\n${out.slice(-1500)}`);
+    const out = ((e.stdout || "") + " " + (e.stderr || "")).trim();
+    const real = extractBawError(e.stdout || "");
+    throw new Error(`baw ${args.join(" ")} 失败: ${real || e.message} | ${out.slice(-300)}`);
   });
   if (stderr && stderr.trim()) log.warn("baw", `stderr: ${stderr.trim().slice(0, 300)}`);
   return parseJsonLoose(stdout);

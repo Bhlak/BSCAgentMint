@@ -19,6 +19,30 @@ export function bnbToWei(bnb) {
 }
 
 /**
+ * 用 functionName 生成候选签名，eth_call 以 value=0 模拟，返回一个能跑通的 calldata。
+ * 用于：免费但拿不到发现者 calldata 时的兜底，以及 preview 被拒后的备选重试。
+ */
+export async function findMintCandidate(event, walletAddress) {
+  if (!event.functionName || !walletAddress) return null;
+  const fn = String(event.functionName).replace(/\(.*/, "");
+  const sigs = [...new Set([`${fn}()`, `${fn}(uint256)`, `${fn}(uint256,uint256)`, "publicMint()", "mint()"])];
+  for (const sig of sigs) {
+    try {
+      const selector = ethers.id(sig).slice(0, 10);
+      let data = selector;
+      const argCount = (sig.match(/,/g) || []).length + (sig.includes("(uint256") ? 1 : 0);
+      if (argCount >= 1) data += BigInt(1).toString(16).padStart(64, "0");
+      if (argCount >= 2) data += BigInt(1).toString(16).padStart(64, "0");
+      await rpc.ethCall({ to: (event.contractAddress || "").toLowerCase(), from: walletAddress, data, value: "0x0" });
+      return data;
+    } catch {
+      /* 该候选不可用，试下一个 */
+    }
+  }
+  return null;
+}
+
+/**
  * 把 project.new 事件变成可执行的 mint 计划。
  * 权威来源是发现者首笔 mint 交易（链上 value + calldata 原样复制）；
  * 拿不到交易时退回事件自带字段。

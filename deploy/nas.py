@@ -3,6 +3,7 @@
 凭据从环境变量读取（也可用 .env 的 NAS_* 段）：
   NAS_HOST / NAS_USER / NAS_PASS / NAS_REMOTE_DIR / NAS_PROXY_URL
 """
+import json
 import os
 import re
 import sys
@@ -215,6 +216,24 @@ def getenv_var(cli, keys):
     safe_print(out.strip())
 
 
+def fails(cli):
+    sftp = cli.open_sftp()
+    tmp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "nas-state.json")
+    try:
+        sftp.get(f"{REMOTE_DIR}/data/state.json", tmp)
+    finally:
+        sftp.close()
+    d = json.load(open(tmp, encoding="utf-8"))
+    safe_print(f"每日已 mint: {d.get('mintedToday')}  attempts 总数: {len(d.get('attempts', {}))}")
+    for k, v in d.get("attempts", {}).items():
+        if v.get("status") != "minted":
+            safe_print(f"--- {v.get('status')} {k} {v.get('at','')}")
+            if v.get("reason"):
+                safe_print("    " + v["reason"][:400].replace("\n", " ⏎ "))
+            if v.get("txHash"):
+                safe_print("    tx=" + v["txHash"])
+
+
 def restartsvc(cli):
     safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose restart"))
 
@@ -238,6 +257,8 @@ if __name__ == "__main__":
             testtg(cli)
         elif action == "address":
             address(cli)
+        elif action == "fails":
+            fails(cli)
         elif action == "restartsvc":
             restartsvc(cli)
         elif action == "restart":

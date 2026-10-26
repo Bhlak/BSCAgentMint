@@ -1,0 +1,8 @@
+node_modules/
+.env
+data/
+logs/
+deploy/__pycache__/
+*.log
+probe-out.txt
+signin.log

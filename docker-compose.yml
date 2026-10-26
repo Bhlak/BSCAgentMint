@@ -1,0 +1,18 @@
+services:
+  bscagentmint:
+    build: .
+    container_name: bscagentmint
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      # 固定设备指纹：baw 会话按它加密，重建容器后会话仍有效
+      BINANCE_INSTANCE_ID: bscagentmint-nas
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - baw-session:/root/.baw
+
+volumes:
+  baw-session:

@@ -1,0 +1,24 @@
+{
+  "name": "bscagentmint",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "start": "node src/index.js",
+    "signin": "node scripts/signin.mjs",
+    "test:tg": "node scripts/test-telegram.mjs",
+    "test:classify": "node scripts/test-classify.mjs",
+    "probe": "node probe-stream.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@binance/agentic-wallet": "^1.12.0",
+    "dotenv": "^18.0.9",
+    "ethers": "^6.17.0",
+    "https-proxy-agent": "^9.1.0",
+    "undici": "^8.12.3",
+    "ws": "^8.22.0"
+  }
+}

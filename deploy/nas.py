@@ -73,18 +73,28 @@ def probe(cli):
 
 
 def push(cli):
+    # 远端已配置的字段（Telegram/每日上限等运行期设置）优先于本地，避免部署覆盖
+    REMOTE_KEEP = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "MAX_MINTS_PER_DAY", "MINT_UNKNOWN_PRICE")
+    remote_env = {}
+    out = run(cli, f"cat {REMOTE_DIR}/.env 2>/dev/null || true")
+    for line in out.splitlines():
+        m = re.match(r"^([A-Z_]+)=(.*)$", line.strip())
+        if m and m.group(1) in REMOTE_KEEP and m.group(2).strip():
+            remote_env[m.group(1)] = m.group(2)
+
     sftp = cli.open_sftp()
-    try:
-        run(cli, f"mkdir -p {REMOTE_DIR}/src {REMOTE_DIR}/scripts")
-    except Exception:
-        pass
+    run(cli, f"mkdir -p {REMOTE_DIR}/src {REMOTE_DIR}/scripts")
     for f in UPLOAD_FILES:
         local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), f)
         with open(local, "r", encoding="utf-8") as fh:
             content = fh.read()
         if f == ".env":
-            # NAS 版代理地址由 NAS_PROXY_URL 决定（留空=直连）
             content = re.sub(r"^PROXY_URL=.*$", f"PROXY_URL={NAS_PROXY_URL}", content, flags=re.M)
+            for k, v in remote_env.items():
+                if re.search(rf"^{k}=.*$", content, flags=re.M):
+                    content = re.sub(rf"^{k}=.*$", f"{k}={v}", content, flags=re.M)
+                else:
+                    content += f"\n{k}={v}"
         remote = f"{REMOTE_DIR}/{f}"
         with sftp.open(remote, "w") as rf:
             rf.write(content)
@@ -94,9 +104,14 @@ def push(cli):
     with open(env_local, "r", encoding="utf-8") as fh:
         content = fh.read()
     content = re.sub(r"^PROXY_URL=.*$", f"PROXY_URL={NAS_PROXY_URL}", content, flags=re.M)
+    for k, v in remote_env.items():
+        if re.search(rf"^{k}=.*$", content, flags=re.M):
+            content = re.sub(rf"^{k}=.*$", f"{k}={v}", content, flags=re.M)
+        else:
+            content += f"\n{k}={v}"
     with sftp.open(f"{REMOTE_DIR}/.env", "w") as rf:
         rf.write(content)
-    print("pushed .env (PROXY_URL cleared)")
+    print("pushed .env (PROXY_URL->NAS, remote-only fields preserved)")
 
 
 def safe_print(s):
@@ -234,6 +249,18 @@ def fails(cli):
                 safe_print("    tx=" + v["txHash"])
 
 
+def diag(cli):
+    safe_print("== container status")
+    safe_print(run(cli, 'docker ps -a --format "{{.Names}} {{.Status}}"'))
+    safe_print(run(cli, 'docker inspect bscagentmint --format "RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}} Status={{.State.Status}} OOM={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}"'))
+    safe_print("== last 40 log lines")
+    safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose logs --tail 40 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g'"))
+    safe_print("== recent errors (24h)")
+    safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose logs --since 24h 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g' | grep -E 'ERROR|WARN|失败|重连|退出' | tail -30"))
+    safe_print("== host state.json summary")
+    safe_print(run(cli, f"cd {REMOTE_DIR} && node -e \"const d=require('/home/dan/bscagentmint/data/state.json');console.log('cursor='+d.cursor,'day='+d.day,'mintedToday='+d.mintedToday,'attempts='+Object.keys(d.attempts).length); const ks=Object.entries(d.attempts).sort((a,b)=>a[1].at<b[1].at?-1:1).slice(-5); ks.forEach(([k,v])=>console.log(v.at,v.status,k))\" 2>&1 || tail -c 600 data/state.json"))
+
+
 def restartsvc(cli):
     safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose restart"))
 
@@ -259,6 +286,8 @@ if __name__ == "__main__":
             address(cli)
         elif action == "fails":
             fails(cli)
+        elif action == "diag":
+            diag(cli)
         elif action == "restartsvc":
             restartsvc(cli)
         elif action == "restart":

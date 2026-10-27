@@ -1,4 +1,4 @@
-// 临时探针：连接 mintgo BSC 新项目流，打印原始消息，确认鉴权与事件结构
+// Temporary probe: connect to the mintgo BSC new-project stream and print raw messages to verify authentication and event structure.
 import WebSocket from "ws";
 import { getWsProxyAgent } from "./src/proxy.js";
 
@@ -21,7 +21,7 @@ ws.on("close", (code, reason) => {
 });
 ws.on("error", (e) => console.log("[error]", e.message));
 
-// 10 分钟后自动退出，避免挂死
+// Exit automatically after 10 minutes to avoid hanging indefinitely.
 setTimeout(() => {
   console.log("[timeout] 10min reached, exiting");
   process.exit(0);

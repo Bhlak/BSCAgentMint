@@ -1,6 +1,6 @@
-"""NAS 全自动部署助手：python deploy/nas.py <probe|push|up|signin|status|...>
+"""NAS deployment helper: python deploy/nas.py <probe|push|up|signin|status|...>
 
-凭据从环境变量读取（也可用 .env 的 NAS_* 段）：
+Credentials are read from environment variables (or the NAS_* section of .env):
   NAS_HOST / NAS_USER / NAS_PASS / NAS_REMOTE_DIR / NAS_PROXY_URL
 """
 import json
@@ -18,11 +18,11 @@ HOST = os.environ.get("NAS_HOST", "")
 USER = os.environ.get("NAS_USER", "dan")
 PASSWORD = os.environ.get("NAS_PASS", "")
 REMOTE_DIR = os.environ.get("NAS_REMOTE_DIR", "/home/dan/bscagentmint")
-# 部署到 NAS 时写入其 .env 的代理地址；留空表示直连
+# Proxy URL written to the NAS .env during deployment; leave empty for a direct connection.
 NAS_PROXY_URL = os.environ.get("NAS_PROXY_URL", "")
 
 if not HOST or not PASSWORD:
-    sys.exit("请先设置 NAS_HOST / NAS_PASS 环境变量（不要把凭据写进代码）")
+    sys.exit("Set the NAS_HOST / NAS_PASS environment variables first (do not put credentials in the code).")
 
 UPLOAD_FILES = [
     "Dockerfile",
@@ -45,7 +45,7 @@ def connect():
 
 
 def run(cli, cmd, timeout=120):
-    """执行命令；优先 docker，权限不足自动加 sudo -S"""
+    """Run a command; try Docker first and automatically add sudo -S if permissions are insufficient."""
     for prefix in ("", "sudo -S "):
         full = prefix + cmd
         stdin, stdout, stderr = cli.exec_command(full, timeout=timeout, get_pty=True)
@@ -73,7 +73,7 @@ def probe(cli):
 
 
 def push(cli):
-    # 远端已配置的字段（Telegram/每日上限等运行期设置）优先于本地，避免部署覆盖
+    # Prefer fields already configured remotely (runtime settings such as Telegram and daily limits) to avoid overwriting them during deployment.
     REMOTE_KEEP = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "MAX_MINTS_PER_DAY", "MINT_UNKNOWN_PRICE")
     remote_env = {}
     out = run(cli, f"cat {REMOTE_DIR}/.env 2>/dev/null || true")
@@ -99,7 +99,7 @@ def push(cli):
         with sftp.open(remote, "w") as rf:
             rf.write(content)
         print("pushed", f)
-    # .env 单独处理（不在 UPLOAD_FILES 里的敏感项）
+    # Handle .env separately (it contains secrets and is not included in UPLOAD_FILES).
     env_local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     with open(env_local, "r", encoding="utf-8") as fh:
         content = fh.read()
@@ -127,7 +127,7 @@ def up(cli):
 
 
 def signin(cli):
-    # 后台起独立登录容器（共享 baw-session 卷），轮询容器日志拿二维码链接
+    # Start a separate sign-in container in the background (sharing the baw-session volume) and poll its logs for the QR code URL.
     run(cli, f"docker rm -f baw-signin 2>/dev/null; true")
     run(cli, f"cd {REMOTE_DIR} && docker compose run -d --name baw-signin bscagentmint node scripts/signin.mjs")
     out = ""
@@ -140,9 +140,9 @@ def signin(cli):
             pm = re.search(r"pairingCode[^,}]*", out)
             if pm:
                 safe_print(pm.group(0))
-            safe_print("扫码后登录容器会自动完成并退出；主服务会在下一个事件时自动感知登录（懒检测）。")
+            safe_print("After scanning, the sign-in container will finish and exit automatically; the main service will detect the sign-in on the next event.")
             return
-    safe_print("未拿到二维码链接，baw-signin 日志：")
+    safe_print("Could not retrieve the QR code URL. baw-signin logs:")
     safe_print(out[-1500:])
 
 
@@ -171,7 +171,7 @@ def dnsdiag(cli):
         safe_print("  system: " + run(cli, f"getent hosts {host} | head -2").strip().replace("\n", " | "))
         safe_print("  alidns53: " + run(cli, f"nslookup {host} 223.5.5.5 2>/dev/null | tail -4").strip().replace("\n", " | "))
         safe_print("  alidoh: " + run(cli, f"curl -sS --max-time 8 'https://dns.alidns.com/resolve?name={host}&type=A' | head -c 400"))
-    # 用阿里 DoH 返回的 IP 直连验证链路
+    # Test the connection directly using IP addresses returned by Alibaba DoH.
     out = run(cli, "curl -sS --max-time 8 'https://dns.alidns.com/resolve?name=api.binance.com&type=A'")
     ips = re.findall(r'"data":"(\d+\.\d+\.\d+\.\d+)"', out)
     for ip in ips[:2]:
@@ -202,7 +202,7 @@ def bapitest(cli):
 
 
 def setenv_var(cli, key, value):
-    """改 NAS .env 里的一个变量；value 为空则删除该行"""
+    """Update a variable in the NAS .env; remove its line if value is empty."""
     if value:
         run(cli, f"cd {REMOTE_DIR} && sed -i 's|^{key}=.*|{key}={value}|' .env && grep -q '^{key}=' .env || echo '{key}={value}' >> .env")
     else:
@@ -239,7 +239,7 @@ def fails(cli):
     finally:
         sftp.close()
     d = json.load(open(tmp, encoding="utf-8"))
-    safe_print(f"每日已 mint: {d.get('mintedToday')}  attempts 总数: {len(d.get('attempts', {}))}")
+    safe_print(f"Minted today: {d.get('mintedToday')}  total attempts: {len(d.get('attempts', {}))}")
     for k, v in d.get("attempts", {}).items():
         if v.get("status") != "minted":
             safe_print(f"--- {v.get('status')} {k} {v.get('at','')}")
@@ -256,7 +256,7 @@ def diag(cli):
     safe_print("== last 40 log lines")
     safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose logs --tail 40 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g'"))
     safe_print("== recent errors (24h)")
-    safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose logs --since 24h 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g' | grep -E 'ERROR|WARN|失败|重连|退出' | tail -30"))
+    safe_print(run(cli, f"cd {REMOTE_DIR} && docker compose logs --since 24h 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g' | grep -Ei 'ERROR|WARN|failed|reconnect|shutting down' | tail -30"))
     safe_print("== host state.json summary")
     safe_print(run(cli, f"cd {REMOTE_DIR} && node -e \"const d=require('/home/dan/bscagentmint/data/state.json');console.log('cursor='+d.cursor,'day='+d.day,'mintedToday='+d.mintedToday,'attempts='+Object.keys(d.attempts).length); const ks=Object.entries(d.attempts).sort((a,b)=>a[1].at<b[1].at?-1:1).slice(-5); ks.forEach(([k,v])=>console.log(v.at,v.status,k))\" 2>&1 || tail -c 600 data/state.json"))
 

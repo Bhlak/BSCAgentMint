@@ -5,9 +5,11 @@ import { initProxyForFetch } from "../src/proxy.js";
 await initProxyForFetch();
 
 if (!telegramEnabled()) {
-  console.log("未配置 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID（.env）");
+  console.log(
+    "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are not configured (.env)",
+  );
   process.exit(0);
 }
 
-notify("✅ BSCAgentMint Telegram 通知测试");
+notify("✅ BSCAgentMint Telegram notification test");
 setTimeout(() => process.exit(0), 5000);

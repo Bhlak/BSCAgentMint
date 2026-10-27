@@ -6,7 +6,7 @@ services:
     env_file: .env
     environment:
       TZ: Asia/Shanghai
-      # 固定设备指纹：baw 会话按它加密，重建容器后会话仍有效
+      # Fixed device fingerprint: baw sessions are encrypted with it and remain valid after container rebuilds.
       BINANCE_INSTANCE_ID: bscagentmint-nas
     volumes:
       - ./.env:/app/.env:ro

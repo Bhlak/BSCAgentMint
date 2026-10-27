@@ -25,37 +25,46 @@ function parseJsonLoose(stdout) {
   }
 }
 
-/** 从 baw --json 的失败输出里提取真实错误（如 EXECUTION_REVERTED: xxx），比命令回显有用得多 */
+/** Extract the underlying error from failed baw --json output (for example, EXECUTION_REVERTED: xxx); this is more useful than the command echo. */
 function extractBawError(stdout) {
   const j = parseJsonLoose(stdout || "");
   if (j && j.error) {
     const name = j.error.name || j.error.code || "";
-    const msg = j.error.message || (j.error.data && JSON.stringify(j.error.data)) || "";
+    const msg =
+      j.error.message || (j.error.data && JSON.stringify(j.error.data)) || "";
     return (name + ": " + msg).trim();
   }
   return null;
 }
 
-/** 运行 baw CLI（自动追加 --json），返回解析后的 JSON 或 {raw}；子进程显式注入代理环境 */
+/** Run the baw CLI (automatically appending --json), return parsed JSON or {raw}, and explicitly inject proxy settings into the child process. */
 export async function baw(args, timeoutMs = 120_000) {
-  const { stdout, stderr } = await execFileP(process.execPath, [CLI_ENTRY, ...args, "--json"], {
-    timeout: timeoutMs,
-    env: { ...process.env, ...childProxyEnv() },
-    maxBuffer: 16 * 1024 * 1024,
-    windowsHide: true,
-  }).catch((e) => {
+  const { stdout, stderr } = await execFileP(
+    process.execPath,
+    [CLI_ENTRY, ...args, "--json"],
+    {
+      timeout: timeoutMs,
+      env: { ...process.env, ...childProxyEnv() },
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    },
+  ).catch((e) => {
     const out = ((e.stdout || "") + " " + (e.stderr || "")).trim();
     const real = extractBawError(e.stdout || "");
-    throw new Error(`baw ${args.join(" ")} 失败: ${real || e.message} | ${out.slice(-300)}`);
+    throw new Error(
+      `baw ${args.join(" ")} failed: ${real || e.message} | ${out.slice(-300)}`,
+    );
   });
-  if (stderr && stderr.trim()) log.warn("baw", `stderr: ${stderr.trim().slice(0, 300)}`);
+  if (stderr && stderr.trim())
+    log.warn("baw", `stderr: ${stderr.trim().slice(0, 300)}`);
   return parseJsonLoose(stdout);
 }
 
-/** 在任意嵌套结构里按键名找值 */
+/** Find a value by key in an arbitrarily nested structure. */
 export function deepFind(obj, key) {
   if (obj == null || typeof obj !== "object") return undefined;
-  if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  if (!Array.isArray(obj) && Object.prototype.hasOwnProperty.call(obj, key))
+    return obj[key];
   for (const v of Object.values(obj)) {
     const hit = deepFind(v, key);
     if (hit !== undefined) return hit;
@@ -65,17 +74,17 @@ export function deepFind(obj, key) {
 
 const RE_ADDR = /^0x[0-9a-fA-F]{40}$/;
 
-/** 从 address 命令的全链输出里挑出 BSC (chain 56) 的地址 */
+/** Select the BSC (chain 56) address from the address command's all-chain output. */
 export function pickBscAddress(node) {
   const isAddr = (s) => typeof s === "string" && RE_ADDR.test(s);
   const walk = (n) => {
     if (n == null || typeof n !== "object") return null;
     if (!Array.isArray(n)) {
-      // 形如 {binanceChainId:56, address:'0x..'} / {chain:'BSC', address:'0x..'} / {'56':'0x..'} / {BSC:'0x..'}
+      // Supported shapes: {binanceChainId:56, address:'0x..'} / {chain:'BSC', address:'0x..'} / {'56':'0x..'} / {BSC:'0x..'}
       const vals = Object.values(n);
       if (vals.some((v) => isAddr(v))) {
         const chainMark = JSON.stringify(n).match(
-          /"(?:binanceChainId|chainId|chain|chainName|network)"\s*:\s*"?(56|BSC|bsc|BSC_MAINNET)"?/
+          /"(?:binanceChainId|chainId|chain|chainName|network)"\s*:\s*"?(56|BSC|bsc|BSC_MAINNET)"?/,
         );
         if (chainMark) {
           for (const v of vals) if (isAddr(v)) return v;
@@ -98,21 +107,29 @@ export const wallet = {
     const r = await baw(["wallet", "status"]);
     return deepFind(r, "status") || "UNKNOWN";
   },
-  /** Agentic Wallet 在 BSC 上的地址（address 命令返回全链列表，需挑出 BSC 条目） */
+  /** Agentic Wallet address on BSC (the address command returns all chains, so select the BSC entry). */
   async address() {
     const r = await baw(["wallet", "address"]);
     const found = pickBscAddress(r);
-    if (!found) log.warn("baw", `未能从 address 输出中识别 BSC 地址: ${JSON.stringify(r).slice(0, 400)}`);
+    if (!found)
+      log.warn(
+        "baw",
+        `Could not identify a BSC address in the address command output: ${JSON.stringify(r).slice(0, 400)}`,
+      );
     return found;
   },
-  /** 钱包 BNB 余额（拿不到返回 null，不阻塞流程） */
+  /** Wallet BNB balance; return null if unavailable without blocking the workflow. */
   async bnbBalance() {
     try {
       const r = await baw(["wallet", "balance", "--binanceChainId", "56"]);
       const str = JSON.stringify(r);
-      const m = str.match(/\{[^{}]*"symbol"\s*:\s*"BNB"[^{}]*\}|\{[^{}]*"BNB"[^{}]*\}/);
+      const m = str.match(
+        /\{[^{}]*"symbol"\s*:\s*"BNB"[^{}]*\}|\{[^{}]*"BNB"[^{}]*\}/,
+      );
       if (m) {
-        const bm = m[0].match(/"balance"\s*:\s*"?([0-9.]+)/) || m[0].match(/"amount"\s*:\s*"?([0-9.]+)/);
+        const bm =
+          m[0].match(/"balance"\s*:\s*"?([0-9.]+)/) ||
+          m[0].match(/"amount"\s*:\s*"?([0-9.]+)/);
         if (bm) return Number(bm[1]);
       }
       return null;
@@ -130,19 +147,31 @@ export const wallet = {
   },
   async contractCallPreview({ from, to, valueWei, inputData }) {
     const r = await baw([
-      "contract-call", "preview",
-      "--binanceChainId", "56",
-      "--from", from,
-      "--to", to,
-      "--value", String(valueWei),
-      "--inputData", inputData,
+      "contract-call",
+      "preview",
+      "--binanceChainId",
+      "56",
+      "--from",
+      from,
+      "--to",
+      to,
+      "--value",
+      String(valueWei),
+      "--inputData",
+      inputData,
     ]);
     const requestId = deepFind(r, "requestId");
-    if (!requestId) throw new Error(`preview 未返回 requestId: ${JSON.stringify(r).slice(0, 800)}`);
+    if (!requestId)
+      throw new Error(
+        `Preview did not return a requestId: ${JSON.stringify(r).slice(0, 800)}`,
+      );
     return { requestId, raw: r };
   },
   async contractCallExecute(requestId) {
-    const r = await baw(["contract-call", "execute", "--requestId", requestId], 180_000);
+    const r = await baw(
+      ["contract-call", "execute", "--requestId", requestId],
+      180_000,
+    );
     return {
       txHash: deepFind(r, "txHash") || deepFind(r, "transactionHash") || null,
       status: deepFind(r, "status") || null,

@@ -51,7 +51,8 @@ export const store = {
   },
   markSeen(eventId) {
     state.seenEventIds.unshift(eventId);
-    if (state.seenEventIds.length > SEEN_CAP) state.seenEventIds = state.seenEventIds.slice(0, SEEN_CAP);
+    if (state.seenEventIds.length > SEEN_CAP)
+      state.seenEventIds = state.seenEventIds.slice(0, SEEN_CAP);
     save();
   },
   attemptOf(eventId) {
@@ -59,7 +60,7 @@ export const store = {
   },
   recordAttempt(eventId, contract, status, extra = {}) {
     const prev = state.attempts[eventId];
-    // 已成功 mint 过的合约不回退状态
+    // Do not roll back state for a contract that has already been minted successfully.
     if (prev?.status === "minted") return;
     state.attempts[eventId] = {
       contract,
@@ -69,7 +70,8 @@ export const store = {
     };
     const keys = Object.keys(state.attempts);
     if (keys.length > ATTEMPT_CAP) {
-      for (const k of keys.slice(0, keys.length - ATTEMPT_CAP)) delete state.attempts[k];
+      for (const k of keys.slice(0, keys.length - ATTEMPT_CAP))
+        delete state.attempts[k];
     }
     if (status === "minted") this.bumpDaily();
     save();
@@ -92,7 +94,7 @@ export const store = {
     state.mintedToday += 1;
     save();
   },
-  /** key 过期提醒每天最多一次 */
+  /** Send an API key expiration reminder at most once per day. */
   shouldWarnKeyExpiry() {
     const today = new Date().toISOString().slice(0, 10);
     if (state.keyExpiryWarnedOn === today) return false;

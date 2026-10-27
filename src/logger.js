@@ -6,12 +6,16 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 const LOG_FILE = path.join(LOG_DIR, "app.log");
 
 function write(level, tag, args) {
-  const line = `[${new Date().toISOString()}] [${level}] [${tag}] ` + args.map(fmt).join(" ");
-  console.log(`${level === "ERROR" ? "✖" : level === "WARN" ? "⚠" : "·"} ${line.slice(line.indexOf("]") + 1)}`);
+  const line =
+    `[${new Date().toISOString()}] [${level}] [${tag}] ` +
+    args.map(fmt).join(" ");
+  console.log(
+    `${level === "ERROR" ? "✖" : level === "WARN" ? "⚠" : "·"} ${line.slice(line.indexOf("]") + 1)}`,
+  );
   try {
     fs.appendFileSync(LOG_FILE, line + "\n");
   } catch {
-    /* 日志写失败不致命 */
+    /* A log write failure is non-fatal. */
   }
 }
 

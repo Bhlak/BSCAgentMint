@@ -1,126 +1,126 @@
-# BSCAgentMint — BSC 新项目免费 mint 哨兵
+# BSCAgentMint — BSC New Project Free Mint Sentinel
 
-监听 [mintgo.fun](https://mintgo.fun) 的 BSC New Project API 实时流，发现**免费 mint** 的新 NFT 项目时，用你的**币安 Agentic Wallet**（Agent ID 钱包）**自动完成 mint，无需人工确认**；拿不准或失败时通过 **Telegram 推送**。
+Monitors the real-time BSC New Project API stream from [mintgo.fun](https://mintgo.fun). When it detects a new NFT project with a **free mint**, it automatically mints using your **Binance Agentic Wallet** (Agent ID wallet), **without requiring manual confirmation**. Uncertain cases and failures are reported through **Telegram**.
 
 ```
-mintgo WS 流 ──► 免费判定(链上首笔mint交易为权威) ──► 安全闸门 ──► baw contract-call preview ──► execute ──► Telegram 报告
-                                                    │
-                                                    └─ 未知/付费/风险 ──► 仅 Telegram 推送
+mintgo WS stream ──► Free-mint classification (first on-chain mint transaction is authoritative) ──► Safety gates ──► baw contract-call preview ──► execute ──► Telegram report
+                                                                                       │
+                                                                                       └─ Unknown / paid / risky ──► Telegram notification only
 ```
 
-## 功能特性
+## Features
 
-- **实时监听**：`wss://mintgo.fun/api/bsc-projects/stream`，Bearer 鉴权；断线指数退避重连，`?since=<cursor>` 断点续传，按 `eventId` 去重
-- **免费判定（宁可漏掉，不可错打）**：
-  1. 拉取事件自带的**发现者首笔 mint 交易**（BSC 公共 RPC），链上 `value` 和 `calldata` 是权威：`value=0` → 免费；`value>0` → 付费
-  2. 拿不到交易时用事件字段（`valueNative` + `priceConfirmed`）
-  3. 仍未知时用 `eth_call` 以 `value=0` 模拟 `mint()`，模拟通过才算免费
-- **自动执行**：原样复制发现者的 calldata（含数量与价格），通过币安官方 CLI [`baw`](https://www.npmjs.com/package/@binance/agentic-wallet)（`@binance/agentic-wallet`）的 `contract-call preview`（币安侧先模拟）→ `execute` 广播；全程不接触私钥（MPC Keyless）
-- **Telegram 推送**：mint 成功/失败、付费与未知项目提醒、每日上限触发、余额不足、API key 即将过期
-- **登录后自动感知**：baw 扫码后无需重启服务，下一个事件时懒检测自动进入 mint 模式
+- **Real-time monitoring**: `wss://mintgo.fun/api/bsc-projects/stream`, with Bearer authentication; reconnects with exponential backoff after disconnects, resumes from `?since=<cursor>`, and deduplicates by `eventId`
+- **Free-mint classification (when in doubt, skip rather than spend incorrectly)**:
+  1. Fetches the discoverer's first mint transaction included with the event (via a public BSC RPC). On-chain `value` and `calldata` are authoritative: `value=0` → free; `value>0` → paid
+  2. If the transaction is unavailable, uses event fields (`valueNative` + `priceConfirmed`)
+  3. If the price is still unknown, simulates `mint()` with `value=0` using `eth_call`; only a successful simulation is treated as free
+- **Automatic execution**: Copies the discoverer's calldata exactly (including quantity and price), then uses Binance's official CLI [`baw`](https://www.npmjs.com/package/@binance/agentic-wallet) (`@binance/agentic-wallet`) to run `contract-call preview` (simulated by Binance) followed by `execute`; the private key is never accessed (MPC Keyless)
+- **Telegram notifications**: Mint success/failure, paid or unknown projects, daily limit reached, insufficient balance, and API key nearing expiration
+- **Automatically detects sign-in**: After signing in to `baw` via QR code, the service detects it lazily on the next event and enters mint mode without a restart
 
-## 快速开始
+## Quick Start
 
-### 1. 本机运行
+### 1. Run locally
 
 ```bash
 npm install
-cp .env.example .env        # 填入 MINTGO_API_KEY（必填）与 Telegram 配置（可选）
-npx baw auth signin         # 币安 App 扫码登录 Agentic Wallet（一次性）
-npm start                   # 前台运行；建议先用 DRY_RUN=true 观察一轮
+cp .env.example .env        # Set MINTGO_API_KEY (required) and Telegram settings (optional)
+npx baw auth signin         # Scan the QR code in the Binance app to sign in to Agentic Wallet (one-time)
+npm start                   # Run in the foreground; first observe a cycle with DRY_RUN=true
 ```
 
-### 2. Docker / NAS 部署（推荐长期挂机）
+### 2. Docker / NAS deployment (recommended for long-running use)
 
 ```bash
 docker compose up -d --build
-# 首次登录：起一个后台登录容器，浏览器打开它日志里的二维码链接扫码
+# First-time sign-in: start a background sign-in container and scan the QR link shown in its logs
 docker compose run -d --name baw-signin bscagentmint node scripts/signin.mjs
-docker logs baw-signin      # 复制 https://app.binance.com/uni-qr/xxx 到浏览器扫码
-# 扫码完成后：docker rm baw-signin
+docker logs baw-signin      # Copy the https://app.binance.com/uni-qr/xxx link into a browser and scan
+# After sign-in: docker rm baw-signin
 ```
 
-要点：
+Key points:
 
-- `BINANCE_INSTANCE_ID` 在 `docker-compose.yml` 里固定为一个自定义值——**baw 会话按设备指纹加密**，固定它 + `baw-session` 卷可以让会话在容器重建后依然有效
-- `.env` / `data` / `logs` / baw 会话全部走卷挂载，镜像不含任何密钥
-- `restart: unless-stopped` 保证开机自启、崩溃自拉
+- `BINANCE_INSTANCE_ID` is set to a custom, fixed value in `docker-compose.yml` — **baw sessions are encrypted using a device fingerprint**, so keeping this value fixed along with the `baw-session` volume preserves the session across container rebuilds
+- `.env`, `data`, `logs`, and the baw session are all mounted as volumes; the image contains no secrets
+- `restart: unless-stopped` enables startup on boot and automatic restarts after crashes
 
-### 3. NAS 一键部署助手（可选）
+### 3. NAS one-click deployment helper (optional)
 
-[`deploy/nas.py`](deploy/nas.py) 封装了从探测、上传、构建、扫码到查状态的完整流程（凭据从环境变量 `NAS_HOST / NAS_USER / NAS_PASS / NAS_REMOTE_DIR / NAS_PROXY_URL` 读取，不写入代码）：
+[`deploy/nas.py`](deploy/nas.py) wraps the full workflow—from probing and uploading through building, QR sign-in, and status checks. Credentials are read from the environment variables `NAS_HOST / NAS_USER / NAS_PASS / NAS_REMOTE_DIR / NAS_PROXY_URL` and are not stored in code:
 
 ```bash
 pip install paramiko python-dotenv
-python deploy/nas.py probe     # 探测系统 / docker / 磁盘
-python deploy/nas.py push      # 上传代码（自动改写 NAS 侧 .env 的 PROXY_URL）
-python deploy/nas.py up        # 构建镜像并启动
-python deploy/nas.py signin    # 后台起登录容器并打印二维码链接
-python deploy/nas.py status    # 容器状态 + 日志尾部 + baw 状态
+python deploy/nas.py probe     # Check system / Docker / disk
+python deploy/nas.py push      # Upload code (automatically rewrites PROXY_URL in the NAS-side .env)
+python deploy/nas.py up        # Build the image and start it
+python deploy/nas.py signin    # Start a sign-in container in the background and print the QR link
+python deploy/nas.py status    # Container status + log tail + baw status
 ```
 
-### Telegram 配置
+### Telegram setup
 
-1. 找 **@BotFather** → `/newbot` → 拿到 bot token
-2. **给自己的 bot 发一条消息**（bot 无法主动发起对话）
-3. `.env` 填 `TELEGRAM_BOT_TOKEN`；`TELEGRAM_CHAT_ID` 可用 `https://api.telegram.org/bot<TOKEN>/getUpdates` 查到
-4. `npm run test:tg` 验证
+1. Find **@BotFather** → send `/newbot` → get a bot token
+2. **Send your bot a message** (a bot cannot initiate a conversation)
+3. Set `TELEGRAM_BOT_TOKEN` in `.env`; find `TELEGRAM_CHAT_ID` using `https://api.telegram.org/bot<TOKEN>/getUpdates`
+4. Run `npm run test:tg` to verify
 
-## 配置（.env）
+## Configuration (`.env`)
 
-| 键 | 默认 | 说明 |
-|---|---|---|
-| `AUTO_MINT` | `true` | `false` 时只推送不执行 |
-| `DRY_RUN` | `false` | `true` 时走到执行前一步停下（只推送不广播） |
-| `MAX_VALUE_BNB` | `0` | 单笔允许的最大花费；**0 = 只打确认免费的** |
-| `MINT_UNKNOWN_PRICE` | `false` | 价格未知是否尝试（默认只推送） |
-| `MAX_MINTS_PER_DAY` | `20` | 每日自动 mint 上限 |
-| `BNB_RESERVE` | `0.003` | 钱包至少保留的 BNB（gas 储备），低于则暂停 |
-| `MINT_QUANTITY_MODE` | `replicate` | 复制发现者首笔 mint 的数量与 calldata |
-| `NOTIFY_NON_FREE` | `true` | 是否推送付费项目 |
-| `PROXY_URL` | 空 | 出站代理（WS/fetch/baw 子进程统一注入；不需要就留空） |
-| `BSC_RPC_URLS` | 内置 | 逗号分隔，自动故障切换 |
+| Key                  | Default     | Description                                                                                            |
+| -------------------- | ----------- | ------------------------------------------------------------------------------------------------------ |
+| `AUTO_MINT`          | `true`      | Set to `false` to notify only without executing                                                        |
+| `DRY_RUN`            | `false`     | When `true`, stops immediately before execution (notifies only; does not broadcast)                    |
+| `MAX_VALUE_BNB`      | `0`         | Maximum allowed spend per mint; **0 = only mint when confirmed free**                                  |
+| `MINT_UNKNOWN_PRICE` | `false`     | Whether to attempt mints when the price is unknown (default: notify only)                              |
+| `MAX_MINTS_PER_DAY`  | `20`        | Daily automatic mint limit                                                                             |
+| `BNB_RESERVE`        | `0.003`     | Minimum BNB balance to keep in reserve for gas; pauses if balance drops below this                     |
+| `MINT_QUANTITY_MODE` | `replicate` | Replicate the quantity and calldata of the discoverer's first mint                                     |
+| `NOTIFY_NON_FREE`    | `true`      | Whether to notify about paid projects                                                                  |
+| `PROXY_URL`          | empty       | Outbound proxy (injected consistently into WS, fetch, and baw subprocesses; leave empty if not needed) |
+| `BSC_RPC_URLS`       | built-in    | Comma-separated list; fails over automatically                                                         |
 
-## 安全闸门（按顺序）
+## Safety Gates (in order)
 
-1. 去重：`eventId` / 已处理过的不重复打；同一合约只打一次
-2. 只打免费（`MAX_VALUE_BNB` 控制，默认 0）
-3. calldata 敏感操作黑名单（`approve` / `setApprovalForAll` / `transferFrom` / `permit`… 一律拦截）
-4. 合约必须有代码（防假部署地址）
-5. 每日次数上限（`MAX_MINTS_PER_DAY`）
-6. BNB 余额保留线（gas 储备）
-7. 币安侧 `preview` 模拟失败 → 直接跳过（不会上链）
+1. Deduplication: do not mint duplicate `eventId`s or previously processed items; mint at most once per contract
+2. Only mint for free projects (`MAX_VALUE_BNB` controls the threshold; default is 0)
+3. Block sensitive calldata operations (`approve` / `setApprovalForAll` / `transferFrom` / `permit`…)
+4. Require the contract to have code (prevents fake deployment addresses)
+5. Enforce the daily mint limit (`MAX_MINTS_PER_DAY`)
+6. Enforce the minimum BNB balance reserve for gas
+7. If Binance-side `preview` simulation fails, skip immediately (nothing is sent on-chain)
 
-再叠一层：**币安 App 里给 Agentic Wallet 设置的每日限额 / 代币范围是币安侧的硬上限**，随时可在 App 里登出 Agentic Wallet 一键吊销脚本权限。
+Additionally, the daily limits and token permissions configured for Agentic Wallet in the **Binance app are hard limits enforced by Binance**. You can revoke the script's access at any time by signing out of Agentic Wallet in the app.
 
-## 常用命令
+## Common Commands
 
 ```bash
-npm start             # 启动服务
-npm run signin        # 扫码登录 baw
-npm run test:tg       # 测试 Telegram 推送
-npm run test:classify # 用真实历史事件离线测试判定链
-npm run probe         # 裸连流打印原始事件（调试）
-npx baw wallet balance --binanceChainId 56   # 钱包余额
-npx baw wallet tx-history                    # 执行历史
+npm start             # Start the service
+npm run signin        # Sign in to baw using the QR code
+npm run test:tg       # Test Telegram notifications
+npm run test:classify # Run offline classification tests against real historical events
+npm run probe         # Connect to the stream directly and print raw events (debugging)
+npx baw wallet balance --binanceChainId 56   # Wallet balance
+npx baw wallet tx-history                    # Transaction history
 ```
 
-## 网络说明
+## Networking
 
-`PROXY_URL` 是唯一代理入口（`.env`）：WebSocket 流、RPC/Telegram 的 fetch、baw CLI 子进程全部由程序显式注入该代理，**不依赖终端环境变量**。留空则直连。国内环境访问币安域名存在 DNS 污染，通常需要代理。
+`PROXY_URL` is the single proxy configuration point (in `.env`): the WebSocket stream, RPC/Telegram fetch requests, and baw CLI subprocesses all receive the proxy explicitly. The setup **does not depend on terminal environment variables**. Leave it empty to connect directly. Access to Binance domains from mainland China may be affected by DNS poisoning; a proxy is usually needed.
 
-## 数据与日志
+## Data and Logs
 
-- `data/state.json`：cursor、去重、每日计数、每个事件的处理结果
-- `data/events.jsonl`：所有收到的原始事件（审计用）
-- `logs/app.log`：运行日志
+- `data/state.json`: Cursor, deduplication data, daily counts, and processing results for each event
+- `data/events.jsonl`: All raw events received (for auditing)
+- `logs/app.log`: Application log
 
-## 已知边界
+## Known Limitations
 
-- mintgo API key 有有效期（创建页显示 Expires），到期前 48 小时服务会推送提醒；到 mintgo.fun 重置后更新 `.env` 重启即可
-- 发现者经由路由/聚合器 mint 的项目拿不到直连 calldata，会走模拟判定，拿不准就只推送不打
-- `MAX_VALUE_BNB>0` 时付费花费按 `单价×数量` 保守估算，实际以币安 preview 为准
-- 免费 mint 的项目质量参差，本工具只负责"自动打免费"，不构成任何投资建议，风险自负
+- mintgo API keys have an expiration date (shown on the creation page). The service sends a reminder 48 hours before expiration; after resetting it on mintgo.fun, update `.env` and restart
+- For projects where the discoverer minted through a router or aggregator, direct calldata may be unavailable. The service falls back to simulation for classification and skips the mint if uncertain
+- When `MAX_VALUE_BNB>0`, paid mint costs are conservatively estimated as `unit price × quantity`; the actual result is determined by Binance preview
+- Free-mint project quality varies. This tool only automates free mints and is not investment advice; use it at your own risk
 
 ## License
 

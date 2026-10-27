@@ -14,33 +14,38 @@ async function post(url, body, timeoutMs) {
       signal: ctrl.signal,
     });
     const json = await res.json();
-    if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+    if (json.error)
+      throw new Error(json.error.message || JSON.stringify(json.error));
     return json.result;
   } finally {
     clearTimeout(t);
   }
 }
 
-/** 轮询 RPC 列表，单个节点失败自动切下一个；业务性 revert 直接抛出不再切换 */
+/** Try RPC endpoints in sequence, failing over when one fails; propagate contract reverts without retrying another endpoint. */
 async function call(method, params) {
   let lastErr;
   for (let i = 0; i < config.rpc.urls.length; i++) {
     const url = config.rpc.urls[(urlIndex + i) % config.rpc.urls.length];
     try {
-      const result = await post(url, { jsonrpc: "2.0", id: 1, method, params }, config.rpc.timeoutMs);
+      const result = await post(
+        url,
+        { jsonrpc: "2.0", id: 1, method, params },
+        config.rpc.timeoutMs,
+      );
       urlIndex = (urlIndex + i) % config.rpc.urls.length;
       return result;
     } catch (e) {
-      if (/revert/i.test(e.message)) throw e; // 合约逻辑性回滚，换节点也一样
+      if (/revert/i.test(e.message)) throw e; // A contract logic revert will also occur on another endpoint.
       lastErr = e;
-      log.warn("rpc", `${url} ${method} 失败: ${e.message}`);
+      log.warn("rpc", `${url} ${method} failed: ${e.message}`);
     }
   }
-  throw lastErr || new Error("所有 RPC 均不可用");
+  throw lastErr || new Error("All RPC endpoints are unavailable");
 }
 
 export const rpc = {
-  /** 发现者首笔 mint 交易：拿权威 value / calldata */
+  /** Discoverer's first mint transaction: retrieve authoritative value / calldata. */
   async getTx(hash) {
     const tx = await call("eth_getTransactionByHash", [hash]);
     if (!tx) return null;
@@ -55,7 +60,7 @@ export const rpc = {
   async getCode(address) {
     return call("eth_getCode", [address, "latest"]);
   },
-  /** 只读模拟合约调用（用于候选 calldata 筛选） */
+  /** Read-only contract call simulation (used to screen candidate calldata). */
   async ethCall({ to, from, data, value = "0x0" }) {
     return call("eth_call", [{ to, from, data, value }, "latest"]);
   },
